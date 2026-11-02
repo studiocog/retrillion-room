@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Retrillion</title>
+  <meta name="description" content="Retrillion thinks, builds, and explores ideas across different fields. This site is a little room you can walk into.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Kalam:wght@400;700&family=Space+Grotesk:wght@500;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/" } }
+  </script>
+  <script>
+    // Decide before first paint: the 3D room (WebGL 2 + JS) or the plain page (anything else, or ?view=flat).
+    (function () {
+      var html = document.documentElement, ok = false;
+      try { ok = !!document.createElement("canvas").getContext("webgl2"); } catch (e) {}
+      if (!ok || /[?&]view=flat\b/.test(location.search)) return;
+      html.classList.add("room");
+      // the loading card's bar; src/main.js reports its steps here
+      window.__progress = function (p) {
+        var pc = Math.round(p * 100), bar = document.querySelector("#gate .bar i"), txt = document.querySelector("#gate .pc");
+        if (bar) bar.style.width = pc + "%";
+        if (txt) txt.textContent = pc + "%";
+        if (p >= 1) { var b = document.getElementById("enter"); b.disabled = false; b.textContent = "Click to enter"; b.focus(); }
+      };
+      // if the room never comes (a blocked CDN, a GPU that gives up), show the plain page instead of a stuck card
+      setTimeout(function () { if (!window.__roomReady) html.classList.remove("room"); }, 20000);
+    })();
+  </script>
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="#home" data-site-name>Retrillion</a>
+    <nav><a href="#about">About</a><a href="#work">Work</a></nav>
+  </header>
+
+  <!-- The real content. It is the whole site without WebGL, what search engines and screen readers get,
+       and what the room reads (src/content.js) to draw its screens, labels and notepad. Edit it here. -->
+  <main class="flat">
+    <section id="home">
+      <h1>Hi, I'm Retrillion.</h1>
+      <p data-tagline>I think, build, and explore ideas across different fields.</p>
+    </section>
+
+    <!-- PLACEHOLDER: the About text and the Work list below are starter copy. Replace them with your own. -->
+    <section id="about">
+      <h2>About</h2>
+      <p>I'm curious by default. I like taking an idea from one field and seeing what it does in another: design next to engineering, systems next to stories, tools next to the people who use them.</p>
+      <p>Most of what I make starts as a question. How does this work? What would it look like if it were built differently? Then I build something to find out.</p>
+      <p>This room is one of those experiments. Pick a tape to see what else I've been working on.</p>
+    </section>
+
+    <section id="work">
+      <h2>Work</h2>
+      <ol>
+        <li data-id="this-room" data-years="2026" data-color="#d9573b">
+          <h3>This Room</h3>
+          <p>A personal site you can walk into: a 3D desk built in three.js, drawn from plain HTML, with a text version underneath.</p>
+        </li>
+        <li data-id="teardowns" data-years="2026–now" data-color="#2f6fd6">
+          <h3>Teardowns</h3>
+          <p>Taking apps and websites apart to understand how they really work, then writing down what I find.</p>
+        </li>
+        <li data-id="field-notes" data-years="ongoing" data-color="#2a9d74">
+          <h3>Field Notes</h3>
+          <p>Short notes on ideas that cross between fields: what one discipline can borrow from another.</p>
+        </li>
+        <li data-id="experiments" data-years="ongoing" data-color="#8a4fd1">
+          <h3>Experiments</h3>
+          <p>Small prototypes and side projects, built quickly to test an idea before it gets big.</p>
+        </li>
+        <li data-id="next" data-years="soon" data-color="#c9971e">
+          <h3>Next Up</h3>
+          <p>Something new is on the workbench. This tape is waiting to be recorded.</p>
+        </li>
+      </ol>
+    </section>
+  </main>
+
+  <div id="room" aria-hidden="true">
+    <canvas id="gl"></canvas>
+    <div class="hud">
+      <span id="hint"></span>
+      <span class="controls">
+        <button type="button" id="back" hidden>← Back · Esc</button>
+        <button type="button" id="sound">Sound off</button>
+        <button type="button" id="lofi">Lo-fi</button>
+        <a href="?view=flat">Text version</a>
+      </span>
+    </div>
+  </div>
+
+  <div id="gate">
+    <div class="card">
+      <p class="kicker">Setting up the room</p>
+      <div class="bar"><i></i></div>
+      <p class="pc">0%</p>
+      <button type="button" id="enter" disabled>Loading…</button>
+      <a href="?view=flat">or read the text version</a>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
