@@ -26,6 +26,9 @@ main.flat li::before { content: attr(data-years); float: right; font: 500 13px/2
 main.flat li h3 { margin: 0; font-size: 20px; }
 main.flat li p { margin: 4px 0; }
 main.flat a { color: var(--accent); }
+.room-note { font: 500 13px/1.6 "IBM Plex Mono", monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 14px; margin: 0 0 24px; }
+.room-note a { white-space: nowrap; }
 
 /* ---------- the room ---------- */
 #room, #gate { display: none; }

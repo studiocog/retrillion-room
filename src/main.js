@@ -46,7 +46,12 @@ const GrainShader = {
     }`,
 };
 
-if (html.classList.contains("room")) start().catch(err => { console.error(err); html.classList.remove("room"); });
+// give up on the room, saying why on the plain page (index.html defines __roomFail)
+const fail = reason => window.__roomFail ? window.__roomFail(reason) : html.classList.remove("room");
+// ?force keeps the room even when the black-picture check below says it isn't drawing (for testing on that device)
+const force = /[?&]force\b/.test(location.search);
+
+if (html.classList.contains("room")) start().catch(err => { console.error(err); fail(`it hit an error while starting (${err?.message || err}).`); });
 
 async function start() {
   progress(.15);
@@ -63,6 +68,11 @@ async function start() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   RectAreaLightUniformsLib.init();
+  // the graphics chip's name, for the reasons fail() gives
+  const gpu = (() => {
+    try { const c = renderer.getContext(), ext = c.getExtension("WEBGL_debug_renderer_info");
+      return String(ext ? c.getParameter(ext.UNMASKED_RENDERER_WEBGL) : c.getParameter(c.RENDERER)); } catch { return "unknown"; }
+  })();
 
   const camera = new THREE.PerspectiveCamera(42, 1, .05, 50);
   const room = await buildRoom(content, p => progress(.4 + p * .45));
@@ -285,7 +295,15 @@ async function start() {
 
   // ---------------------------------------------------------------- the frame loop
   const par = new THREE.Vector2(), tmp = new THREE.Vector3();
+  // an error inside the frame would repeat every frame and leave the canvas black; after a few, stop and say so
+  let frameErrors = 0;
   function frame(ms) {
+    try { drawFrame(ms); } catch (err) {
+      if (++frameErrors === 1) console.error(err);
+      if (frameErrors >= 5) { renderer.setAnimationLoop(null); fail(`drawing failed: ${err?.message || err} (GPU: ${gpu}).`); }
+    }
+  }
+  function drawFrame(ms) {
     runTweens(ms);
     // a little parallax with the pointer, less when close up
     const amt = viewFor(route) === V.tv ? .25 : 1;
@@ -309,13 +327,14 @@ async function start() {
   // pixels from the frame just drawn (readPixels right after drawing, before the browser presents it); if nearly all
   // are black, drop to Lo-fi (no post-processing), and if that is black too, show the text version.
   const gl = renderer.getContext(), px = new Uint8Array(4);
-  let checkAt = 0, strikes = 0;
+  let checkAt = 0, strikes = 0, lastLit = 0;
   function frameLooksBlack() {
     const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; let lit = 0;
     for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
       gl.readPixels((w * i / 6) | 0, (h * j / 6) | 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
       if (px[0] + px[1] + px[2] > 30) lit++;
     }
+    lastLit = lit;
     return lit < 3;
   }
   function checkFrame(ms) {
@@ -323,16 +342,19 @@ async function start() {
     if (!frameLooksBlack()) return;
     strikes++;
     if (strikes === 1 && !lofi) {
-      console.warn("room: the frame came out black; switching to Lo-fi");
+      console.warn(`room: the picture came out black (${lastLit}/25 lit samples, GPU: ${gpu}); switching to Lo-fi`);
       lofi = true; applyQuality(); checkAt = ms + 1200;
+    } else if (force) {
+      console.warn(`room: still black in Lo-fi (${lastLit}/25 lit samples, GPU: ${gpu}); staying because of ?force`);
     } else {
-      console.warn("room: still black in Lo-fi; showing the text version");
-      renderer.setAnimationLoop(null); html.classList.remove("room");
+      renderer.setAnimationLoop(null);
+      fail(`the 3D picture came out black, even in Lo-fi (GPU: ${gpu}; ${lastLit}/25 lit samples; ${innerWidth}×${innerHeight} at ${devicePixelRatio}x).`);
     }
   }
   canvas.addEventListener("webglcontextlost", e => {
-    e.preventDefault(); console.warn("room: WebGL context lost; showing the text version");
-    renderer.setAnimationLoop(null); html.classList.remove("room");
+    e.preventDefault();
+    renderer.setAnimationLoop(null);
+    fail(`the browser took the 3D graphics away (WebGL context lost; GPU: ${gpu}).`);
   });
 
   // build every shader before the gate opens, so the first frames after the click don't stall

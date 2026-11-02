@@ -19,17 +19,35 @@
     (function () {
       var html = document.documentElement, ok = false;
       try { ok = !!document.createElement("canvas").getContext("webgl2"); } catch (e) {}
-      if (!ok || /[?&]view=flat\b/.test(location.search)) return;
+      // Leave the room for the plain page, and say why on it, so a visitor can report what went wrong.
+      // src/main.js calls this too (a render error, a black picture, a lost GPU context).
+      window.__roomFail = function (reason) {
+        html.classList.remove("room");
+        console.warn("room: " + reason);
+        var show = function () {
+          var n = document.getElementById("room-note");
+          if (n) { n.hidden = false; n.querySelector(".why").textContent = reason; }
+        };
+        document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", show) : show();
+      };
+      if (/[?&]view=flat\b/.test(location.search)) return;
+      if (!ok) { window.__roomFail("this browser doesn't offer WebGL 2."); return; }
       html.classList.add("room");
       // the loading card's bar; src/main.js reports its steps here
+      var last = Date.now();
       window.__progress = function (p) {
+        last = Date.now();
         var pc = Math.round(p * 100), bar = document.querySelector("#gate .bar i"), txt = document.querySelector("#gate .pc");
         if (bar) bar.style.width = pc + "%";
         if (txt) txt.textContent = pc + "%";
         if (p >= 1) { var b = document.getElementById("enter"); b.disabled = false; b.textContent = "Click to enter"; b.focus(); }
       };
-      // if the room never comes (a blocked CDN, a GPU that gives up), show the plain page instead of a stuck card
-      setTimeout(function () { if (!window.__roomReady) html.classList.remove("room"); }, 20000);
+      // a stuck card helps nobody: if loading makes no progress for 25 s (a blocked CDN, a script that failed),
+      // show the plain page. A slow but moving download keeps waiting.
+      var timer = setInterval(function () {
+        if (window.__roomReady) return clearInterval(timer);
+        if (Date.now() - last > 25000) { clearInterval(timer); window.__roomFail("loading stopped making progress (a blocked or failed download)."); }
+      }, 1000);
     })();
   </script>
 </head>
@@ -42,6 +60,10 @@
   <!-- The real content. It is the whole site without WebGL, what search engines and screen readers get,
        and what the room reads (src/content.js) to draw its screens, labels and notepad. Edit it here. -->
   <main class="flat">
+    <p id="room-note" class="room-note" hidden>
+      This site is usually a 3D room, but it couldn't start here: <span class="why"></span>
+      <a href="?force">Try the room anyway</a>
+    </p>
     <section id="home">
       <h1>Hi, I'm Retrillion.</h1>
       <p data-tagline>I think, build, and explore ideas across different fields.</p>
