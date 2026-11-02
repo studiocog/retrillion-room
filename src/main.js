@@ -4,7 +4,11 @@ import * as THREE from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { readContent } from "./content.js";
 import { buildRoom } from "./room.js";
 import { createSound } from "./sound.js";
@@ -14,6 +18,20 @@ const progress = p => window.__progress?.(p);
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                 set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+// the last pass: a little film grain and a soft vignette, so the room reads as a photograph rather than a render
+const GrainShader = {
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, amount: { value: .04 }, vignette: { value: .45 } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float time, amount, vignette; varying vec2 vUv;
+    float rand(vec2 c){ return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      c.rgb += (rand(vUv * 1000. + fract(time) * 37.) - .5) * amount;
+      c.rgb *= 1. - vignette * smoothstep(.3, .9, distance(vUv, vec2(.5)));
+      gl_FragColor = c;
+    }`,
+};
 
 if (html.classList.contains("room")) start().catch(err => { console.error(err); html.classList.remove("room"); });
 
@@ -27,22 +45,34 @@ async function start() {
   const content = readContent();
   const canvas = document.getElementById("gl");
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMapping = THREE.AgXToneMapping;
+  renderer.toneMappingExposure = 1.35;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  RectAreaLightUniformsLib.init();
 
-  const camera = new THREE.PerspectiveCamera(45, 1, .05, 50);
-  const room = buildRoom(content);
-  progress(.65);
+  const camera = new THREE.PerspectiveCamera(42, 1, .05, 50);
+  const room = await buildRoom(content, p => progress(.4 + p * .45));
+  // soft reflections for the glass, metal and varnish: a neutral room, turned well down for night
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  room.scene.environment = pmrem.fromScene(new RoomEnvironment(), .04).texture;
+  room.scene.environmentIntensity = .12;
+  progress(.88);
 
-  // post-processing: the scene, then bloom (the screen, bulb and city windows glow), then tone mapping and sRGB
+  // post-processing: the scene, ambient occlusion (contact shadows in corners and under things), bloom (the screen,
+  // bulb and city glow), tone mapping and sRGB, then grain and vignette
   const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(room.scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), .5, .45, .85);
+  const gtao = new GTAOPass(room.scene, camera, 256, 256);
+  gtao.updateGtaoMaterial({ radius: .18, distanceExponent: 1.5, thickness: 1, scale: 1.1 });
+  gtao.blendIntensity = .9;
+  composer.addPass(gtao);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), .42, .55, .9);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  const grain = new ShaderPass(GrainShader);
+  composer.addPass(grain);
 
   // ---------------------------------------------------------------- quality and sound controls
   const sound = createSound();
@@ -52,7 +82,8 @@ async function start() {
   function applyQuality() {
     renderer.setPixelRatio(lofi ? 1 : Math.min(devicePixelRatio, 2));
     composer.setPixelRatio(renderer.getPixelRatio());
-    room.lamp.light.castShadow = !lofi;
+    room.lamp.light.castShadow = room.lamp.moon.castShadow = !lofi;
+    gtao.enabled = !lofi;
     lofiBtn.setAttribute("aria-pressed", String(lofi));
     lofiBtn.textContent = lofi ? "Lo-fi on" : "Lo-fi";
     resize();
@@ -74,7 +105,8 @@ async function start() {
     V.tv.look.copy(c); V.tv.pos.set(c.x, c.y + .02, c.z + dt);
     // the notepad held up: in front of the home camera, facing it
     const dir = V.home.look.clone().sub(V.home.pos).normalize();
-    V.note.pos.copy(V.home.pos).addScaledVector(dir, fit(.5 * 1.15, .7 * 1.15));
+    const [nw, nh] = room.note.size;
+    V.note.pos.copy(V.home.pos).addScaledVector(dir, fit(nw * 1.15, nh * 1.15));
     V.note.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(V.home.pos, V.home.look, new THREE.Vector3(0, 1, 0)));
     V.intro.pos.copy(V.home.pos).add(new THREE.Vector3(.2, .35, 1.4));
   }
@@ -170,6 +202,10 @@ async function start() {
       else if (k === "screen") h = route.page === "tape" && room.tv.view.item?.href ? `Visit ${new URL(room.tv.view.item.href).host}` : route.page === "home" ? "Watch: About" : h;
       else if (k === "lamp") h = room.lamp.on ? "Switch the lamp off" : "Switch the lamp on";
       else if (k === "mug") h = "Have a sip";
+      else if (k === "walkman") h = "Play a tune";
+      else if (k === "glasses") h = "Fidget with the glasses";
+      else if (k === "plant") h = "Brush the leaves";
+      else if (k === "clock") h = `It's ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     }
     hintEl.textContent = h;
   }
@@ -203,6 +239,15 @@ async function start() {
     else if (k === "mug") {
       sound.sip();
       tween("mug", 700, k2 => { room.mug.rotation.z = Math.sin(k2 * Math.PI * 3) * (1 - k2) * .12; });
+    } else if (k === "walkman") sound.tune();
+    else if (k === "glasses") {
+      sound.click();
+      const ry = room.specs.rotation.y, y = room.specs.position.y;
+      tween("specs", 650, k2 => { room.specs.rotation.y = ry + Math.sin(k2 * Math.PI) * .5; room.specs.position.y = y + Math.sin(k2 * Math.PI) * .03; });
+    } else if (k === "plant" && room.leaves) {
+      sound.rustle();
+      const rz = room.leaves.rotation.z;
+      tween("plant", 1400, k2 => { room.leaves.rotation.z = rz + Math.sin(k2 * Math.PI * 5) * (1 - k2) * .05; });
     }
   });
   addEventListener("keydown", e => {
@@ -237,9 +282,10 @@ async function start() {
     for (const t of room.tapes) {
       const want = t.userData.item.id === selected ? .16 : hover?.object === t ? .05 : 0;
       t.userData.out += (want - t.userData.out) * .15;
-      t.position.z = t.userData.rest.z + t.userData.out;
+      t.position.copy(t.userData.rest).addScaledVector(t.userData.dir, t.userData.out);
     }
     room.update(ms / 1000);
+    grain.uniforms.time.value = ms / 1000;
     if (lofi) renderer.render(room.scene, camera); else composer.render();
   }
 

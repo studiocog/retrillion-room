@@ -4,6 +4,12 @@ A personal site that is a small 3D room: a TV, a stack of tapes, a notepad, a de
 It uses the same techniques found when reverse-engineering felixrieseberg.com (see `../felixrieseberg-com/REPORT.md`),
 with original content and design and no model or image files.
 
+## Credits
+
+3D models from [Poly Haven](https://polyhaven.com/models) (CC0): painted wooden table, television 02, industrial pipe lamp,
+potted plant 02, portable cassette player, round spectacles, stationery supplies, hanging picture frame 02, alarm clock 01.
+They were compressed for the web with `gltf-transform optimize --compress meshopt` into `models/*.glb`.
+
 ## Run it
 
 ```bash

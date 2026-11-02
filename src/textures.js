@@ -55,46 +55,122 @@ export function drawWood(w, h, { base = "#5b3a22", planks = 8, seed = 7 } = {}) 
 }
 
 // ------------------------------------------------------------------ the city out the window
-// Three layers of buildings; only the nearest layer's windows switch on and off (twinkle), since a farther window
-// could be behind a nearer building and repainting it would punch a hole.
-export function drawCity(w, h, seed = 11) {
-  const t = canvasTexture(w, h), { g } = t, r = rng(seed);
-  const sky = g.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, "#04050c"); sky.addColorStop(.5, "#10142a"); sky.addColorStop(.78, "#2a2138"); sky.addColorStop(1, "#3b2a33");
-  g.fillStyle = sky; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 120; i++) { g.fillStyle = `rgba(255,255,255,${r() * .6})`; g.fillRect(r() * w, r() * h * .4, 1, 1); }
-  g.fillStyle = "#f4ecd8"; g.shadowColor = "#f4ecd8"; g.shadowBlur = 24;
-  g.beginPath(); g.arc(w * .76, h * .3, 13, 0, Math.PI * 2); g.fill(); g.shadowBlur = 0;
+// Two pictures at two depths, so the city moves with parallax as the camera does:
+//   far   the sky, a hazy glow off the streets, and two soft skylines (blurred: out of focus behind the glass)
+//   near  one sharper skyline on a clear background, with windows that switch on and off (twinkle), rooftop water
+//         tanks, red beacons, and big out-of-focus street lights (bokeh) along the bottom
+const blurOK = typeof CanvasRenderingContext2D !== "undefined" && "filter" in CanvasRenderingContext2D.prototype;
 
-  const layers = [
-    { color: "#171b2e", min: .34, max: .58, wmin: 22, wmax: 60, win: .12 },
-    { color: "#0e1121", min: .3, max: .52, wmin: 30, wmax: 80, win: .22 },
-    { color: "#07080f", min: .26, max: .44, wmin: 45, wmax: 110, win: .32, live: true },
-  ];
-  const windows = [], beacons = [];
-  const paint = win => { g.fillStyle = win.on ? win.lit : win.off; g.fillRect(win.x, win.y, win.w, win.h); };
-  for (const L of layers) {
-    for (let x = -10; x < w;) {
-      const bw = L.wmin + r() * (L.wmax - L.wmin), bh = h * (L.min + r() * (L.max - L.min)), top = h - bh;
-      g.fillStyle = L.color; g.fillRect(x, top, bw, bh);
-      const cw = 4, ch = 6, gx = 4, gy = 5;
-      for (let wy = top + 7; wy < h - ch; wy += ch + gy) for (let wx = x + 5; wx < x + bw - cw - 3; wx += cw + gx) {
-        const warm = r() < .85;
-        const win = { x: wx, y: wy, w: cw, h: ch, on: r() < L.win, off: "#141724",
-          lit: warm ? (r() < .5 ? "#ffc96b" : "#ffe2a8") : "#a8d8ff" };
-        paint(win); if (L.live) windows.push(win);
-      }
-      if (L.live && bh > h * .4) beacons.push({ x: x + bw / 2, y: top - 3 });
-      x += bw + r() * 6;
+function skyline(g, r, w, h, { color, min, max, wmin, wmax, win, cw = 4, ch = 6, onWindow }) {
+  const out = [];
+  for (let x = -10; x < w;) {
+    const bw = wmin + r() * (wmax - wmin), bh = h * (min + r() * (max - min)), top = h - bh;
+    g.fillStyle = color; g.fillRect(x, top, bw, bh);
+    if (r() < .3) { g.fillRect(x + bw * .3, top - 10, bw * .12, 10); }            // a rooftop box
+    for (let wy = top + 8; wy < h - ch; wy += ch + 5) for (let wx = x + 5; wx < x + bw - cw - 3; wx += cw + 4) {
+      const warm = r() < .82;
+      const wnd = { x: wx, y: wy, w: cw, h: ch, on: r() < win, off: "#121521",
+        lit: warm ? (r() < .5 ? "#ffc067" : "#ffe0a3") : "#9fd2ff" };
+      onWindow?.(wnd);
+      g.fillStyle = wnd.on ? wnd.lit : wnd.off; g.fillRect(wnd.x, wnd.y, wnd.w, wnd.h);
     }
+    out.push({ x, bw, top, bh });
+    x += bw + r() * 5;
   }
-  const beacon = on => { for (const b of beacons) { g.fillStyle = on ? "#ff3b30" : "#2a0c10"; g.fillRect(b.x - 2, b.y - 2, 4, 4); } };
+  return out;
+}
+
+export function drawCityLayers(seed = 11) {
+  const r = rng(seed);
+  // far
+  const far = canvasTexture(1024, 576), fg = far.g, FW = 1024, FH = 576;
+  const sky = fg.createLinearGradient(0, 0, 0, FH);
+  sky.addColorStop(0, "#03040a"); sky.addColorStop(.45, "#0c1024"); sky.addColorStop(.75, "#2a2036"); sky.addColorStop(1, "#5a3a3a");
+  fg.fillStyle = sky; fg.fillRect(0, 0, FW, FH);
+  for (let i = 0; i < 90; i++) { fg.fillStyle = `rgba(255,255,255,${r() * .45})`; fg.fillRect(r() * FW, r() * FH * .35, 1, 1); }
+  fg.fillStyle = "#efe6d2"; fg.shadowColor = "#efe6d2"; fg.shadowBlur = 30;
+  fg.beginPath(); fg.arc(FW * .18, FH * .22, 11, 0, Math.PI * 2); fg.fill(); fg.shadowBlur = 0;
+  if (blurOK) fg.filter = "blur(2.5px)";
+  skyline(fg, r, FW, FH, { color: "#1a1d31", min: .28, max: .5, wmin: 18, wmax: 50, win: .1, cw: 3, ch: 4 });
+  if (blurOK) fg.filter = "blur(1.4px)";
+  skyline(fg, r, FW, FH, { color: "#11142a", min: .22, max: .42, wmin: 26, wmax: 70, win: .18, cw: 3, ch: 5 });
+  if (blurOK) fg.filter = "none";
+  const haze = fg.createLinearGradient(0, FH * .6, 0, FH);                         // the street glow
+  haze.addColorStop(0, "rgba(255,140,80,0)"); haze.addColorStop(1, "rgba(255,140,80,.28)");
+  fg.fillStyle = haze; fg.fillRect(0, FH * .6, FW, FH * .4);
+
+  // near
+  const near = canvasTexture(1024, 560), ng = near.g, NW = 1024, NH = 560;
+  const windows = [];
+  if (blurOK) ng.filter = "blur(.8px)";                                             // a little soft: seen through wet glass
+  const blds = skyline(ng, r, NW, NH, { color: "#06070d", min: .3, max: .62, wmin: 60, wmax: 150, win: .3, cw: 5, ch: 8,
+    onWindow: wnd => windows.push(wnd) });
+  if (blurOK) ng.filter = "none";
+  const beacons = blds.filter(b => b.bh > NH * .5).map(b => ({ x: b.x + b.bw / 2, y: b.top - 4 }));
+  for (let i = 0; i < 26; i++) {                                                   // out-of-focus street lights
+    const x = r() * NW, y = NH - r() * NH * .12, rad = 8 + r() * 22, warm = r() < .75;
+    const grd = ng.createRadialGradient(x, y, 0, x, y, rad);
+    const col = warm ? "255,170,90" : "140,200,255";
+    grd.addColorStop(0, `rgba(${col},.55)`); grd.addColorStop(.7, `rgba(${col},.25)`); grd.addColorStop(1, `rgba(${col},0)`);
+    ng.fillStyle = grd; ng.beginPath(); ng.arc(x, y, rad, 0, Math.PI * 2); ng.fill();
+  }
+  const paint = wnd => { ng.fillStyle = wnd.on ? wnd.lit : wnd.off; ng.fillRect(wnd.x, wnd.y, wnd.w, wnd.h); };
+  const beacon = on => { for (const b of beacons) { ng.clearRect(b.x - 3, b.y - 3, 6, 6); ng.fillStyle = on ? "#ff3b30" : "#3a0d12"; ng.fillRect(b.x - 2, b.y - 2, 4, 4); } };
   beacon(true);
   return {
-    ...t,
-    twinkle() { const win = windows[(r() * windows.length) | 0]; if (win) { win.on = !win.on; paint(win); t.tex.needsUpdate = true; } },
-    beacon(on) { beacon(on); t.tex.needsUpdate = true; },
+    far, near,
+    twinkle() { const w = windows[(r() * windows.length) | 0]; if (w) { w.on = !w.on; paint(w); near.tex.needsUpdate = true; } },
+    beacon(on) { beacon(on); near.tex.needsUpdate = true; },
   };
+}
+
+// ------------------------------------------------------------------ rain on the glass
+// Small drops that stay put, and a few bigger ones that run down, leaving a wet trail. Drawn as faint highlights:
+// the glass catches the city's light where the water is.
+export function createRainGlass(w = 512, h = 300, seed = 5) {
+  const t = canvasTexture(w, h), { g } = t, r = rng(seed);
+  const still = Array.from({ length: 260 }, () => ({ x: r() * w, y: r() * h, s: .35 + r() * .9 }));
+  const fresh = () => ({ x: r() * w, y: -20 - r() * h, v: 18 + r() * 50, s: 1 + r() * 1.1, wob: r() * 10 });
+  const runners = Array.from({ length: 12 }, fresh);
+  const drop = (x, y, s, a = 1) => {
+    g.fillStyle = `rgba(150,170,215,${.12 * a})`; g.beginPath(); g.ellipse(x, y, s, s * 1.25, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = `rgba(255,240,220,${.22 * a})`; g.fillRect(x - s * .35, y - s * .7, Math.max(.8, s * .4), Math.max(.8, s * .4));
+  };
+  return {
+    ...t,
+    draw(dt) {
+      g.clearRect(0, 0, w, h);
+      for (const d of still) drop(d.x, d.y, d.s, .8);
+      for (const d of runners) {
+        d.y += d.v * dt * (.4 + Math.random() * 1.2);
+        d.x += Math.sin(d.y * .05 + d.wob) * .15;
+        if (d.y > h + 20) Object.assign(d, fresh());
+        const trail = g.createLinearGradient(0, d.y - 60, 0, d.y);
+        trail.addColorStop(0, "rgba(190,210,255,0)"); trail.addColorStop(1, "rgba(190,210,255,.16)");
+        g.strokeStyle = trail; g.lineWidth = d.s * .9; g.beginPath(); g.moveTo(d.x, d.y - 60); g.lineTo(d.x, d.y); g.stroke();
+        drop(d.x, d.y, d.s);
+      }
+      t.tex.needsUpdate = true;
+    },
+  };
+}
+
+// ------------------------------------------------------------------ plaster for the walls
+export function drawPlaster(w, h, { base = "#4a403c", seed = 21 } = {}) {
+  const t = canvasTexture(w, h), { g } = t, r = rng(seed);
+  g.fillStyle = base; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 60; i++) {                                                   // broad, soft unevenness
+    const x = r() * w, y = r() * h, rad = 40 + r() * 140, grd = g.createRadialGradient(x, y, 0, x, y, rad);
+    const c = r() < .5 ? "0,0,0" : "255,240,220";
+    grd.addColorStop(0, `rgba(${c},.05)`); grd.addColorStop(1, `rgba(${c},0)`);
+    g.fillStyle = grd; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  for (let i = 0; i < 9000; i++) {                                                 // fine grain
+    g.fillStyle = r() < .5 ? `rgba(0,0,0,${r() * .08})` : `rgba(255,255,255,${r() * .05})`;
+    g.fillRect(r() * w, r() * h, 1 + r(), 1 + r());
+  }
+  t.tex.wrapS = t.tex.wrapT = THREE.RepeatWrapping;
+  return t;
 }
 
 // ------------------------------------------------------------------ the TV's screen

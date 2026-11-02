@@ -40,5 +40,18 @@ export function createSound() {
     thunk: () => { tone(140, 50, .15, .6); burst(.05, 2500, 1, .3); },   // a tape going in
     sip: () => burst(.22, 700, 3, .25),
     lamp: () => { burst(.02, 6000, 4, .5); tone(900, 700, .03, .15); },
+    rustle: () => { burst(.35, 5000, .7, .12); setTimeout(() => burst(.25, 4200, .7, .08), 120); },
+    // a short tape-warbly arpeggio from the cassette player
+    tune() {
+      if (!on) return;
+      burst(.05, 2500, 1, .25);
+      [392, 494, 587, 740, 587, 494].forEach((f, i) => {
+        const t = ctx.currentTime + .12 + i * .16, o = ctx.createOscillator(), g = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+        o.type = "triangle"; o.frequency.value = f; lfo.frequency.value = 5; lg.gain.value = f * .006;
+        lfo.connect(lg).connect(o.frequency);
+        g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.18, t + .02); g.gain.exponentialRampToValueAtTime(.001, t + .3);
+        o.connect(g).connect(master); o.start(t); lfo.start(t); o.stop(t + .32); lfo.stop(t + .32);
+      });
+    },
   };
 }
