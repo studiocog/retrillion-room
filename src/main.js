@@ -19,6 +19,19 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                 set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
+// Some GPUs produce the odd NaN or infinite pixel in the ambient occlusion or lighting; bloom then smears it across
+// the whole frame and the screen goes black. This pass, before bloom, replaces such pixels and caps extreme values.
+const SanitizeShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }",
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      if (any(isnan(c)) || any(isinf(c))) c = vec4(0., 0., 0., 1.);
+      gl_FragColor = vec4(min(c.rgb, vec3(32.)), c.a);
+    }`,
+};
+
 // the last pass: a little film grain and a soft vignette, so the room reads as a photograph rather than a render
 const GrainShader = {
   uniforms: { tDiffuse: { value: null }, time: { value: 0 }, amount: { value: .04 }, vignette: { value: .45 } },
@@ -68,6 +81,7 @@ async function start() {
   gtao.updateGtaoMaterial({ radius: .18, distanceExponent: 1.5, thickness: 1, scale: 1.1 });
   gtao.blendIntensity = .9;
   composer.addPass(gtao);
+  composer.addPass(new ShaderPass(SanitizeShader));
   const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), .42, .55, .9);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
@@ -287,7 +301,39 @@ async function start() {
     room.update(ms / 1000);
     grain.uniforms.time.value = ms / 1000;
     if (lofi) renderer.render(room.scene, camera); else composer.render();
+    if (checkAt && ms >= checkAt) checkFrame(ms);
   }
+
+  // ---------------------------------------------------------------- a black-frame watchdog
+  // A GPU or driver can fail at one of the effects without any error. Shortly after the room opens, sample a grid of
+  // pixels from the frame just drawn (readPixels right after drawing, before the browser presents it); if nearly all
+  // are black, drop to Lo-fi (no post-processing), and if that is black too, show the text version.
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  let checkAt = 0, strikes = 0;
+  function frameLooksBlack() {
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight; let lit = 0;
+    for (let i = 1; i <= 5; i++) for (let j = 1; j <= 5; j++) {
+      gl.readPixels((w * i / 6) | 0, (h * j / 6) | 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      if (px[0] + px[1] + px[2] > 30) lit++;
+    }
+    return lit < 3;
+  }
+  function checkFrame(ms) {
+    checkAt = 0;
+    if (!frameLooksBlack()) return;
+    strikes++;
+    if (strikes === 1 && !lofi) {
+      console.warn("room: the frame came out black; switching to Lo-fi");
+      lofi = true; applyQuality(); checkAt = ms + 1200;
+    } else {
+      console.warn("room: still black in Lo-fi; showing the text version");
+      renderer.setAnimationLoop(null); html.classList.remove("room");
+    }
+  }
+  canvas.addEventListener("webglcontextlost", e => {
+    e.preventDefault(); console.warn("room: WebGL context lost; showing the text version");
+    renderer.setAnimationLoop(null); html.classList.remove("room");
+  });
 
   // build every shader before the gate opens, so the first frames after the click don't stall
   room.tv.show({ kind: "home" }, now(), false);
@@ -307,5 +353,6 @@ async function start() {
     document.getElementById("room").removeAttribute("aria-hidden");
     entered = true;
     go(parse(location.hash), 1800);
+    checkAt = performance.now() + 1500;
   }, { once: true });
 }
